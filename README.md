@@ -183,7 +183,7 @@ $ vault write -format=json auth/jwt-auth/login token=@jwt.json
 
 ## Have fun
 
-And let me know what you like or hate... but be kind, I am very sensitive. :)
+And let me know what you like or hate... but be kind, I am very sensitive. :) Note: much of this code was based on the Vault GitHub plugin. I used the same code that I contributed to that plugin for MFA here. 
 
 Also, I will be delivering a secrets plugin that allows the creation of JWTs in the near future. This will include some capabilities that should be fun.
 

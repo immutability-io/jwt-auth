@@ -40,12 +40,12 @@ func pathConfig(b *backend) []*framework.Path {
 				},
 				"jwt_signer": &framework.FieldSchema{
 					Type:        framework.TypeString,
-					Description: `The public key used to verify the JWT signature. `,
+					Description: `The public key used to validate the JWT signature.`,
 				},
 				"jwt_algorithm": &framework.FieldSchema{
 					Type:        framework.TypeString,
 					Default:     "RS256",
-					Description: `The algorithm used to generate the signer key. `,
+					Description: `The algorithm used to generate the signer's private key.`,
 				},
 				"ttl": &framework.FieldSchema{
 					Type:        framework.TypeString,
