@@ -37,30 +37,30 @@ I assume that you are using TLS to connect to Vault. I assume this because I res
 
 A very simple Vault configuration - a laptop special - might look like this:
 
-```json
-"default_lease_ttl": "24h"
+```
+"default_lease_ttl" = "24h"
 
-"ui": "true"
-"max_lease_ttl": "24h"
-"disable_mlock": "true"
+"ui" = "true"
+"max_lease_ttl" = "24h"
+"disable_mlock" = "true"
 "backend" "file" {
-  "path": "/Users/immutability/etc/vault.d/data"
+  "path" = "/Users/immutability/etc/vault.d/data"
 }
 
-"api_addr": "https://localhost:8200"
+"api_addr" = "https://localhost:8200"
 
 "listener" "tcp" {
-  "address": "localhost:8200"
+  "address" = "localhost:8200"
 
-  "tls_cert_file": "/Users/immutability/etc/vault.d/vault.crt"
-  "tls_client_ca_file": "/immutability/tssbi08/etc/vault.d/root.crt"
-  "tls_key_file": "/Users/immutability/etc/vault.d/vault.key"
+  "tls_cert_file" = "/Users/immutability/etc/vault.d/vault.crt"
+  "tls_client_ca_file" = "/immutability/tssbi08/etc/vault.d/root.crt"
+  "tls_key_file" = "/Users/immutability/etc/vault.d/vault.key"
 }
 
-"plugin_directory": "/Users/immutability/etc/vault.d/vault_plugins"
+"plugin_directory" = "/Users/immutability/etc/vault.d/vault_plugins"
 ```
 
-Note: `"api_addr": "https://localhost:8200"`. [This is important for plugins](https://www.vaultproject.io/docs/configuration/index.html#api_addr).
+Note: `"api_addr" = "https://localhost:8200"`. [This is important for plugins](https://www.vaultproject.io/docs/configuration/index.html#api_addr).
 
 Assuming this configuration - yours may be different, so the following commands may need to be tweaked -the following will install the plugin:
 
