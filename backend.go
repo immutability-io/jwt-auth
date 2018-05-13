@@ -53,6 +53,13 @@ func Backend() *backend {
 		DefaultKey: "default",
 	}
 
+	b.TrusteeMap = &framework.PolicyMap{
+		PathMap: framework.PathMap{
+			Name: "trustees",
+		},
+		DefaultKey: "default",
+	}
+
 	b.UserMap = &framework.PolicyMap{
 		PathMap: framework.PathMap{
 			Name: "users",
@@ -86,9 +93,9 @@ func Backend() *backend {
 type backend struct {
 	*framework.Backend
 
-	RoleMap *framework.PolicyMap
-
-	UserMap *framework.PolicyMap
+	RoleMap    *framework.PolicyMap
+	TrusteeMap *framework.PolicyMap
+	UserMap    *framework.PolicyMap
 }
 
 const backendHelp = `
