@@ -53,7 +53,7 @@ A very simple Vault configuration - a laptop special - might look like this:
   "address" = "localhost:8200"
 
   "tls_cert_file" = "/Users/immutability/etc/vault.d/vault.crt"
-  "tls_client_ca_file" = "/immutability/tssbi08/etc/vault.d/root.crt"
+  "tls_client_ca_file" = "/Users/immutability/etc/vault.d/root.crt"
   "tls_key_file" = "/Users/immutability/etc/vault.d/vault.key"
 }
 
