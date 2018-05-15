@@ -47,6 +47,26 @@ func pathConfig(b *backend) []*framework.Path {
 					Default:     "RS256",
 					Description: `The algorithm used to generate the signer's private key.`,
 				},
+				"oauth_resource": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: `The resource that is the audience of this JWT. Only used when authenticating with user/pass.`,
+				},
+				"oauth_endpoint": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: `The URL to authenticate to retrieve a JWT. Only used when authenticating with user/pass.`,
+				},
+				"oauth_client_id": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: `The client ID to retrieve a JWT. Only used when authenticating with user/pass.`,
+				},
+				"oauth_client_secret": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: `The shared secret to retrieve a JWT. Only used when authenticating with user/pass.`,
+				},
+				"ad_domain": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: `The AD domain for the user.`,
+				},
 				"ttl": &framework.FieldSchema{
 					Type:        framework.TypeString,
 					Description: `Duration after which authentication will be expired`,
@@ -75,6 +95,11 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 	subjectClaim := data.Get("subject_claim").(string)
 	jwtSigner := data.Get("jwt_signer").(string)
 	jwtAlgorithm := data.Get("jwt_algorithm").(string)
+	oauthResource := data.Get("oauth_resource").(string)
+	oauthEndpoint := data.Get("oauth_endpoint").(string)
+	oauthClientID := data.Get("oauth_client_id").(string)
+	oauthClientSecret := data.Get("oauth_client_secret").(string)
+	adDomain := data.Get("ad_domain").(string)
 
 	var ttl time.Duration
 	var err error
@@ -104,13 +129,18 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 	}
 
 	entry, err := logical.StorageEntryJSON("config", config{
-		RoleClaim:     roleClaim,
-		SubjectClaim:  subjectClaim,
-		JWTSigner:     jwtSigner,
-		JWTAlgorithm:  jwtAlgorithm,
-		TTL:           ttl,
-		MaxTTL:        maxTTL,
-		BoundCIDRList: boundCIDRList,
+		RoleClaim:         roleClaim,
+		SubjectClaim:      subjectClaim,
+		JWTSigner:         jwtSigner,
+		JWTAlgorithm:      jwtAlgorithm,
+		OauthResource:     oauthResource,
+		OauthEndpoint:     oauthEndpoint,
+		OauthClientID:     oauthClientID,
+		OauthClientSecret: oauthClientSecret,
+		ADDomain:          adDomain,
+		TTL:               ttl,
+		MaxTTL:            maxTTL,
+		BoundCIDRList:     boundCIDRList,
 	})
 
 	if err != nil {
@@ -139,13 +169,18 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, data
 
 	resp := &logical.Response{
 		Data: map[string]interface{}{
-			"role_claim":      config.RoleClaim,
-			"subject_claim":   config.SubjectClaim,
-			"jwt_signer":      config.JWTSigner,
-			"jwt_algorithm":   config.JWTAlgorithm,
-			"ttl":             config.TTL,
-			"max_ttl":         config.MaxTTL,
-			"bound_cidr_list": config.BoundCIDRList,
+			"role_claim":          config.RoleClaim,
+			"subject_claim":       config.SubjectClaim,
+			"jwt_signer":          config.JWTSigner,
+			"jwt_algorithm":       config.JWTAlgorithm,
+			"oauth_resource":      config.OauthResource,
+			"oauth_endpoint":      config.OauthEndpoint,
+			"oauth_client_id":     config.OauthClientID,
+			"oauth_client_secret": config.OauthClientSecret,
+			"oauth_ad_domain":     config.ADDomain,
+			"ttl":                 config.TTL,
+			"max_ttl":             config.MaxTTL,
+			"bound_cidr_list":     config.BoundCIDRList,
 		},
 	}
 	return resp, nil
@@ -169,11 +204,16 @@ func (b *backend) Config(ctx context.Context, s logical.Storage) (*config, error
 }
 
 type config struct {
-	RoleClaim     string        `json:"role_claim" structs:"role_claim" mapstructure:"role_claim"`
-	SubjectClaim  string        `json:"subject_claim" structs:"subject_claim" mapstructure:"subject_claim"`
-	JWTSigner     string        `json:"jwt_signer" structs:"jwt_signer" mapstructure:"jwt_signer"`
-	JWTAlgorithm  string        `json:"jwt_algorithm" structs:"jwt_algorithm" mapstructure:"jwt_algorithm"`
-	TTL           time.Duration `json:"ttl" structs:"ttl" mapstructure:"ttl"`
-	MaxTTL        time.Duration `json:"max_ttl" structs:"max_ttl" mapstructure:"max_ttl"`
-	BoundCIDRList []string      `json:"bound_cidr_list_list" structs:"bound_cidr_list" mapstructure:"bound_cidr_list"`
+	RoleClaim         string        `json:"role_claim" structs:"role_claim" mapstructure:"role_claim"`
+	SubjectClaim      string        `json:"subject_claim" structs:"subject_claim" mapstructure:"subject_claim"`
+	JWTSigner         string        `json:"jwt_signer" structs:"jwt_signer" mapstructure:"jwt_signer"`
+	JWTAlgorithm      string        `json:"jwt_algorithm" structs:"jwt_algorithm" mapstructure:"jwt_algorithm"`
+	OauthResource     string        `json:"oauth_resource" structs:"oauth_resource" mapstructure:"oauth_resource"`
+	OauthEndpoint     string        `json:"oauth_endpoint" structs:"oauth_endpoint" mapstructure:"oauth_endpoint"`
+	OauthClientID     string        `json:"oauth_client_id" structs:"oauth_client_id" mapstructure:"oauth_client_id"`
+	OauthClientSecret string        `json:"oauth_client_secret" structs:"oauth_client_secret" mapstructure:"oauth_client_secret"`
+	ADDomain          string        `json:"ad_domain" structs:"ad_domain" mapstructure:"ad_domain"`
+	TTL               time.Duration `json:"ttl" structs:"ttl" mapstructure:"ttl"`
+	MaxTTL            time.Duration `json:"max_ttl" structs:"max_ttl" mapstructure:"max_ttl"`
+	BoundCIDRList     []string      `json:"bound_cidr_list_list" structs:"bound_cidr_list" mapstructure:"bound_cidr_list"`
 }

@@ -17,8 +17,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -28,6 +33,7 @@ import (
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
 	jwt "github.com/immutability-io/jwt-go"
+	"github.com/sethgrid/pester"
 )
 
 // JWTMappings is returned after successful authentication. This
@@ -36,6 +42,17 @@ import (
 type JWTMappings struct {
 	Claims   jwt.MapClaims
 	Policies []string
+}
+
+// TokenResponse is the response from the OAuth server
+type TokenResponse struct {
+	AccessToken           string `json:"access_token" structs:"access_token" mapstructure:"access_token"`
+	TokenType             string `json:"token_type" structs:"token_type" mapstructure:"token_type"`
+	ExpiresIn             int    `json:"expires_in" structs:"expires_in" mapstructure:"expires_in"`
+	Resource              string `json:"resource" structs:"resource" mapstructure:"resource"`
+	RefreshToken          string `json:"refresh_token" structs:"refresh_token" mapstructure:"refresh_token"`
+	RefreshTokenExpiresIn int    `json:"refresh_token_expires_in" structs:"refresh_token_expires_in" mapstructure:"refresh_token_expires_in"`
+	IDToken               string `json:"id_token" structs:"id_token" mapstructure:"id_token"`
 }
 
 // ClaimsList returns this list of claims as strings
@@ -67,6 +84,14 @@ func pathLogin(b *backend) []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "This is the JWT token in base64 encoded form.",
 				},
+				"username": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: "User name for authenticating to an endpoint to retrieve a JWT - overrides token auth.",
+				},
+				"password": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: "The password for the username above.",
+				},
 			},
 
 			Callbacks: map[logical.Operation]framework.OperationFunc{
@@ -76,6 +101,88 @@ func pathLogin(b *backend) []*framework.Path {
 			},
 		},
 	}
+}
+
+func (b *backend) getJWTFromOauthPasswordGrant(ctx context.Context, req *logical.Request, username, password string) (*TokenResponse, error) {
+	config, err := b.Config(ctx, req.Storage)
+	if err != nil {
+		return nil, err
+	}
+	if config.OauthClientID == "" || config.OauthEndpoint == "" || config.OauthClientSecret == "" {
+		return nil, fmt.Errorf("missing configuration elements")
+	}
+	caCertPool := x509.NewCertPool()
+	httpClient := &pester.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: caCertPool,
+			},
+		},
+	}
+	data := url.Values{}
+	data.Add("grant_type", "password")
+	data.Add("client_id", config.OauthClientID)
+	data.Add("client_secret", config.OauthClientSecret)
+	if config.OauthResource != "" {
+		data.Add("resource", config.OauthResource)
+	}
+	if config.ADDomain != "" {
+		data.Add("username", fmt.Sprintf("%s\\%s", config.ADDomain, username))
+	}
+	data.Add("password", password)
+	resp, err := httpClient.PostForm(config.OauthEndpoint, data)
+	if err != nil {
+		return nil, err
+	}
+	var htmlData []byte
+	htmlData, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var payload TokenResponse
+	err = json.Unmarshal(htmlData, &payload)
+	if err != nil {
+		return nil, err
+	}
+	return &payload, nil
+}
+
+func (b *backend) getJWTFromOauthRefresh(ctx context.Context, req *logical.Request, refreshToken string) (*TokenResponse, error) {
+	config, err := b.Config(ctx, req.Storage)
+	if err != nil {
+		return nil, err
+	}
+	if config.OauthClientID == "" || config.OauthEndpoint == "" || config.OauthClientSecret == "" {
+		return nil, fmt.Errorf("missing configuration elements")
+	}
+	caCertPool := x509.NewCertPool()
+	httpClient := &pester.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: caCertPool,
+			},
+		},
+	}
+	data := url.Values{}
+	data.Add("grant_type", "refresh_token")
+	data.Add("client_id", config.OauthClientID)
+	data.Add("client_secret", config.OauthClientSecret)
+	data.Add("refresh_token", refreshToken)
+	resp, err := httpClient.PostForm(config.OauthEndpoint, data)
+	if err != nil {
+		return nil, err
+	}
+	var htmlData []byte
+	htmlData, err = ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var payload TokenResponse
+	err = json.Unmarshal(htmlData, &payload)
+	if err != nil {
+		return nil, err
+	}
+	return &payload, nil
 }
 
 func (b *backend) pathLoginAliasLookahead(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
@@ -104,6 +211,19 @@ func (b *backend) pathLoginAliasLookahead(ctx context.Context, req *logical.Requ
 
 func (b *backend) pathLogin(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
 	token := data.Get("token").(string)
+	username := data.Get("username").(string)
+	password := data.Get("password").(string)
+
+	refreshToken := ""
+
+	if username != "" && password != "" {
+		tokenResponse, err := b.getJWTFromOauthPasswordGrant(ctx, req, username, password)
+		if err != nil {
+			return nil, err
+		}
+		token = tokenResponse.IDToken
+		refreshToken = tokenResponse.RefreshToken
+	}
 	var jwtMappings *JWTMappings
 
 	if jwtMappingsResp, resp, err := b.validateJWT(ctx, req, token); err != nil {
@@ -121,7 +241,8 @@ func (b *backend) pathLogin(ctx context.Context, req *logical.Request, data *fra
 	resp := &logical.Response{
 		Auth: &logical.Auth{
 			InternalData: map[string]interface{}{
-				"token": token,
+				"token":         token,
+				"refresh_token": refreshToken,
 			},
 			DisplayName: jwtMappings.Claims[config.SubjectClaim].(string),
 			Policies:    jwtMappings.Policies,
@@ -152,12 +273,20 @@ func (b *backend) pathLoginRenew(ctx context.Context, req *logical.Request, d *f
 	if req.Auth == nil {
 		return nil, fmt.Errorf("there is no authentication information in this request")
 	}
-
-	tokenRaw, ok := req.Auth.InternalData["token"]
-	if !ok {
-		return nil, fmt.Errorf("token created in previous version of Vault cannot be validated properly at renewal time")
+	token := ""
+	refreshToken, ok := req.Auth.InternalData["refresh_token"]
+	if ok && refreshToken != "" {
+		tokenResponse, err := b.getJWTFromOauthRefresh(ctx, req, refreshToken.(string))
+		if err != nil {
+			tokenRaw, ok := req.Auth.InternalData["token"]
+			if !ok {
+				return nil, fmt.Errorf("token created in previous version of Vault cannot be validated properly at renewal time")
+			}
+			token = tokenRaw.(string)
+		} else {
+			token = tokenResponse.IDToken
+		}
 	}
-	token := tokenRaw.(string)
 
 	var jwtMappings *JWTMappings
 	if jwtMappingsResp, validateResp, err := b.validateJWT(ctx, req, token); err != nil {
