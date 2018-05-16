@@ -103,12 +103,12 @@ func pathLogin(b *backend) []*framework.Path {
 	}
 }
 
-func (b *backend) getJWTFromOauthPasswordGrant(ctx context.Context, req *logical.Request, username, password string) (*TokenResponse, error) {
+func (b *backend) makeOauthRequest(ctx context.Context, req *logical.Request, data url.Values) (*TokenResponse, error) {
 	config, err := b.Config(ctx, req.Storage)
 	if err != nil {
 		return nil, err
 	}
-	if config.OauthClientID == "" || config.OauthEndpoint == "" || config.OauthClientSecret == "" || config.OauthCACert == "" {
+	if config.OauthEndpoint == "" || config.OauthClientID == "" || config.OauthResource == "" || config.OauthClientSecret == "" || config.OauthCACert == "" {
 		return nil, fmt.Errorf("missing configuration elements")
 	}
 
@@ -126,18 +126,13 @@ func (b *backend) getJWTFromOauthPasswordGrant(ctx context.Context, req *logical
 		},
 	}
 
-	data := url.Values{}
-	data.Add("grant_type", "password")
 	data.Add("client_id", config.OauthClientID)
 	data.Add("client_secret", config.OauthClientSecret)
 	if config.OauthResource != "" {
 		data.Add("resource", config.OauthResource)
 	}
-	if config.ADDomain != "" {
-		data.Add("username", fmt.Sprintf("%s\\%s", config.ADDomain, username))
-	}
-	data.Add("password", password)
 	encoded := []byte(data.Encode())
+
 	request, err := http.NewRequest("POST", config.OauthEndpoint, bytes.NewBuffer(encoded))
 	if err != nil {
 		return nil, err
@@ -163,50 +158,31 @@ func (b *backend) getJWTFromOauthPasswordGrant(ctx context.Context, req *logical
 	}
 
 	return &payload, nil
+
 }
 
-func (b *backend) getJWTFromOauthRefresh(ctx context.Context, req *logical.Request, refreshToken string) (*TokenResponse, error) {
+func (b *backend) getJWTFromOauthPasswordGrant(ctx context.Context, req *logical.Request, username, password string) (*TokenResponse, error) {
 	config, err := b.Config(ctx, req.Storage)
 	if err != nil {
 		return nil, err
 	}
-	if config.OauthClientID == "" || config.OauthEndpoint == "" || config.OauthClientSecret == "" {
-		return nil, fmt.Errorf("missing configuration elements")
+
+	data := url.Values{}
+	data.Add("grant_type", "password")
+	if config.ADDomain != "" {
+		data.Add("username", fmt.Sprintf("%s\\%s", config.ADDomain, username))
+	} else {
+		data.Add("username", username)
 	}
-	caCertPool := x509.NewCertPool()
-	httpClient := &pester.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs: caCertPool,
-			},
-		},
-	}
+	data.Add("password", password)
+	return b.makeOauthRequest(ctx, req, data)
+}
+
+func (b *backend) getJWTFromOauthRefresh(ctx context.Context, req *logical.Request, refreshToken string) (*TokenResponse, error) {
 	data := url.Values{}
 	data.Add("grant_type", "refresh_token")
-	data.Add("client_id", config.OauthClientID)
-	data.Add("client_secret", config.OauthClientSecret)
 	data.Add("refresh_token", refreshToken)
-	resp, err := httpClient.PostForm(config.OauthEndpoint, data)
-	if err != nil {
-		return nil, err
-	}
-	if resp == nil {
-		return nil, fmt.Errorf("no response from Oauth server")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("refresh token is not valid - likely expired")
-	}
-	var htmlData []byte
-	htmlData, err = ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	var payload TokenResponse
-	err = json.Unmarshal(htmlData, &payload)
-	if err != nil {
-		return nil, err
-	}
-	return &payload, nil
+	return b.makeOauthRequest(ctx, req, data)
 }
 
 func (b *backend) pathLoginAliasLookahead(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
@@ -223,11 +199,18 @@ func (b *backend) pathLoginAliasLookahead(ctx context.Context, req *logical.Requ
 	} else {
 		jwtMappings = jwtMappingsResp
 	}
+	if jwtMappings == nil {
+		return nil, fmt.Errorf("unable to map claims")
+	}
+	subject, ok := jwtMappings.Claims[config.SubjectClaim]
+	if !ok {
+		return nil, fmt.Errorf("unable to find subject")
+	}
 
 	return &logical.Response{
 		Auth: &logical.Auth{
 			Alias: &logical.Alias{
-				Name: jwtMappings.Claims[config.SubjectClaim].(string),
+				Name: subject.(string),
 			},
 		},
 	}, nil
@@ -263,18 +246,28 @@ func (b *backend) pathLogin(ctx context.Context, req *logical.Request, data *fra
 	if err != nil {
 		return nil, err
 	}
-	subject := jwtMappings.Claims[config.SubjectClaim].(string)
-	claims := jwtMappings.Claims[config.RoleClaim]
+	if jwtMappings == nil {
+		return nil, fmt.Errorf("unable to map claims")
+	}
+	subject, ok := jwtMappings.Claims[config.SubjectClaim]
+	if !ok {
+		return nil, fmt.Errorf("unable to find subject")
+	}
+
+	claims, ok := jwtMappings.Claims[config.RoleClaim]
+	if !ok {
+		return nil, fmt.Errorf("unable to find roles")
+	}
 	resp := &logical.Response{
 		Auth: &logical.Auth{
 			InternalData: map[string]interface{}{
 				"token":         token,
 				"refresh_token": refreshToken,
 			},
-			DisplayName: subject,
+			DisplayName: subject.(string),
 			Policies:    jwtMappings.Policies,
 			Metadata: map[string]string{
-				"username": subject,
+				"username": subject.(string),
 				"jwt":      token,
 				"roles":    fmt.Sprintf("%v", claims),
 			},
@@ -283,7 +276,7 @@ func (b *backend) pathLogin(ctx context.Context, req *logical.Request, data *fra
 				Renewable: true,
 			},
 			Alias: &logical.Alias{
-				Name: jwtMappings.Claims[config.SubjectClaim].(string),
+				Name: subject.(string),
 			},
 		},
 	}
@@ -305,6 +298,7 @@ func (b *backend) pathLoginRenew(ctx context.Context, req *logical.Request, d *f
 	refreshToken, ok := req.Auth.InternalData["refresh_token"]
 	if ok && refreshToken != "" {
 		tokenResponse, err := b.getJWTFromOauthRefresh(ctx, req, refreshToken.(string))
+
 		if err != nil {
 			tokenRaw, ok := req.Auth.InternalData["token"]
 			if !ok {
@@ -312,7 +306,7 @@ func (b *backend) pathLoginRenew(ctx context.Context, req *logical.Request, d *f
 			}
 			token = tokenRaw.(string)
 		} else {
-			token = tokenResponse.IDToken
+			token = tokenResponse.AccessToken
 		}
 	}
 
@@ -339,11 +333,26 @@ func (b *backend) pathLoginRenew(ctx context.Context, req *logical.Request, d *f
 	}
 
 	resp.Auth.GroupAliases = nil
-	roles := jwtMappings.Claims[config.RoleClaim].([]string)
-	for _, role := range roles {
+	if jwtMappings == nil {
+		return nil, fmt.Errorf("unable to map claims")
+	}
+
+	claims, ok := jwtMappings.Claims[config.RoleClaim].([]interface{})
+	if !ok {
+		roleName, ok := jwtMappings.Claims[config.RoleClaim].(string)
+		if !ok {
+			return nil, fmt.Errorf("unable to find roles")
+		}
 		resp.Auth.GroupAliases = append(resp.Auth.GroupAliases, &logical.Alias{
-			Name: role,
+			Name: roleName,
 		})
+	} else {
+		for _, role := range claims {
+			roleName := role.(string)
+			resp.Auth.GroupAliases = append(resp.Auth.GroupAliases, &logical.Alias{
+				Name: roleName,
+			})
+		}
 	}
 
 	return resp, nil
