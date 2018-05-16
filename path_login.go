@@ -108,17 +108,24 @@ func (b *backend) getJWTFromOauthPasswordGrant(ctx context.Context, req *logical
 	if err != nil {
 		return nil, err
 	}
-	if config.OauthClientID == "" || config.OauthEndpoint == "" || config.OauthClientSecret == "" {
+	if config.OauthClientID == "" || config.OauthEndpoint == "" || config.OauthClientSecret == "" || config.OauthCACert == "" {
 		return nil, fmt.Errorf("missing configuration elements")
 	}
+
+	caCert, err := ioutil.ReadFile(config.OauthCACert)
+	if err != nil {
+		return nil, err
+	}
 	caCertPool := x509.NewCertPool()
-	httpClient := &pester.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs: caCertPool,
-			},
+	caCertPool.AppendCertsFromPEM(caCert)
+	httpClient := pester.New()
+
+	httpClient.Transport = &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs: caCertPool,
 		},
 	}
+
 	data := url.Values{}
 	data.Add("grant_type", "password")
 	data.Add("client_id", config.OauthClientID)
@@ -130,9 +137,19 @@ func (b *backend) getJWTFromOauthPasswordGrant(ctx context.Context, req *logical
 		data.Add("username", fmt.Sprintf("%s\\%s", config.ADDomain, username))
 	}
 	data.Add("password", password)
-	resp, err := httpClient.PostForm(config.OauthEndpoint, data)
+	encoded := []byte(data.Encode())
+	request, err := http.NewRequest("POST", config.OauthEndpoint, bytes.NewBuffer(encoded))
 	if err != nil {
 		return nil, err
+	}
+	request.Header.Add("Content-Type", "x-www-form-urlencoded")
+
+	resp, err := httpClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("OAuth endpoint failed to return a response")
 	}
 	var htmlData []byte
 	htmlData, err = ioutil.ReadAll(resp.Body)
@@ -144,6 +161,7 @@ func (b *backend) getJWTFromOauthPasswordGrant(ctx context.Context, req *logical
 	if err != nil {
 		return nil, err
 	}
+
 	return &payload, nil
 }
 
@@ -171,6 +189,12 @@ func (b *backend) getJWTFromOauthRefresh(ctx context.Context, req *logical.Reque
 	resp, err := httpClient.PostForm(config.OauthEndpoint, data)
 	if err != nil {
 		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("no response from Oauth server")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("refresh token is not valid - likely expired")
 	}
 	var htmlData []byte
 	htmlData, err = ioutil.ReadAll(resp.Body)
@@ -218,10 +242,11 @@ func (b *backend) pathLogin(ctx context.Context, req *logical.Request, data *fra
 
 	if username != "" && password != "" {
 		tokenResponse, err := b.getJWTFromOauthPasswordGrant(ctx, req, username, password)
+
 		if err != nil {
 			return nil, err
 		}
-		token = tokenResponse.IDToken
+		token = tokenResponse.AccessToken
 		refreshToken = tokenResponse.RefreshToken
 	}
 	var jwtMappings *JWTMappings
@@ -238,17 +263,20 @@ func (b *backend) pathLogin(ctx context.Context, req *logical.Request, data *fra
 	if err != nil {
 		return nil, err
 	}
+	subject := jwtMappings.Claims[config.SubjectClaim].(string)
+	claims := jwtMappings.Claims[config.RoleClaim]
 	resp := &logical.Response{
 		Auth: &logical.Auth{
 			InternalData: map[string]interface{}{
 				"token":         token,
 				"refresh_token": refreshToken,
 			},
-			DisplayName: jwtMappings.Claims[config.SubjectClaim].(string),
+			DisplayName: subject,
 			Policies:    jwtMappings.Policies,
 			Metadata: map[string]string{
-				"username": jwtMappings.Claims[config.SubjectClaim].(string),
-				"claims":   fmt.Sprintf("%v", jwtMappings.Claims[config.RoleClaim]),
+				"username": subject,
+				"jwt":      token,
+				"roles":    fmt.Sprintf("%v", claims),
 			},
 			LeaseOptions: logical.LeaseOptions{
 				TTL:       config.TTL,
@@ -323,15 +351,15 @@ func (b *backend) pathLoginRenew(ctx context.Context, req *logical.Request, d *f
 
 func (b *backend) parseJWT(ctx context.Context, token string, algorithm string, publicKey []byte) (jwt.MapClaims, error) {
 	tokenWithoutWhitespace := regexp.MustCompile(`\s*$`).ReplaceAll([]byte(token), []byte{})
-	var err error
-	if parsed, err := jwt.Parse(string(tokenWithoutWhitespace), func(t *jwt.Token) (interface{}, error) {
+	parsed, err := jwt.Parse(string(tokenWithoutWhitespace), func(t *jwt.Token) (interface{}, error) {
 		if strings.HasPrefix(algorithm, "ES") {
 			return jwt.ParseECPublicKeyFromPEM(publicKey)
 		} else if strings.HasPrefix(algorithm, "RS") {
 			return jwt.ParseRSAPublicKeyFromPEM(publicKey)
 		}
 		return publicKey, nil
-	}); err == nil {
+	})
+	if err == nil {
 		claims := parsed.Claims.(jwt.MapClaims)
 		return claims, claims.Valid()
 	}
@@ -352,10 +380,14 @@ func (b *backend) validateJWT(ctx context.Context, req *logical.Request, token s
 		return nil, nil, err
 	}
 	publicKey := []byte(config.JWTSigner)
+
 	claims, err := b.parseJWT(ctx, token, config.JWTAlgorithm, publicKey)
 
 	if err != nil {
 		return nil, nil, err
+	}
+	if claims == nil {
+		return nil, nil, fmt.Errorf("unable to parse claims - likely a time sync issue")
 	}
 	if validConnection, err := b.validIPConstraints(ctx, req); !validConnection {
 		return nil, nil, err

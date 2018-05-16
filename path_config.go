@@ -29,7 +29,7 @@ func pathConfig(b *backend) []*framework.Path {
 			Pattern: "config",
 			Fields: map[string]*framework.FieldSchema{
 				"role_claim": &framework.FieldSchema{
-					Default:     "groups",
+					Default:     "group",
 					Type:        framework.TypeString,
 					Description: `Name of the claim (key) which will be used to map roles to policies.`,
 				},
@@ -54,6 +54,10 @@ func pathConfig(b *backend) []*framework.Path {
 				"oauth_endpoint": &framework.FieldSchema{
 					Type:        framework.TypeString,
 					Description: `The URL to authenticate to retrieve a JWT. Only used when authenticating with user/pass.`,
+				},
+				"oauth_cacert": &framework.FieldSchema{
+					Type:        framework.TypeString,
+					Description: `The CA Certificate used to sign the OAuth endpoint certificate.`,
 				},
 				"oauth_client_id": &framework.FieldSchema{
 					Type:        framework.TypeString,
@@ -97,6 +101,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 	jwtAlgorithm := data.Get("jwt_algorithm").(string)
 	oauthResource := data.Get("oauth_resource").(string)
 	oauthEndpoint := data.Get("oauth_endpoint").(string)
+	oauthCACert := data.Get("oauth_cacert").(string)
 	oauthClientID := data.Get("oauth_client_id").(string)
 	oauthClientSecret := data.Get("oauth_client_secret").(string)
 	adDomain := data.Get("ad_domain").(string)
@@ -135,6 +140,7 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 		JWTAlgorithm:      jwtAlgorithm,
 		OauthResource:     oauthResource,
 		OauthEndpoint:     oauthEndpoint,
+		OauthCACert:       oauthCACert,
 		OauthClientID:     oauthClientID,
 		OauthClientSecret: oauthClientSecret,
 		ADDomain:          adDomain,
@@ -175,6 +181,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, data
 			"jwt_algorithm":       config.JWTAlgorithm,
 			"oauth_resource":      config.OauthResource,
 			"oauth_endpoint":      config.OauthEndpoint,
+			"oauth_cacert":        config.OauthCACert,
 			"oauth_client_id":     config.OauthClientID,
 			"oauth_client_secret": config.OauthClientSecret,
 			"oauth_ad_domain":     config.ADDomain,
@@ -210,6 +217,7 @@ type config struct {
 	JWTAlgorithm      string        `json:"jwt_algorithm" structs:"jwt_algorithm" mapstructure:"jwt_algorithm"`
 	OauthResource     string        `json:"oauth_resource" structs:"oauth_resource" mapstructure:"oauth_resource"`
 	OauthEndpoint     string        `json:"oauth_endpoint" structs:"oauth_endpoint" mapstructure:"oauth_endpoint"`
+	OauthCACert       string        `json:"oauth_cacert" structs:"oauth_cacert" mapstructure:"oauth_cacert"`
 	OauthClientID     string        `json:"oauth_client_id" structs:"oauth_client_id" mapstructure:"oauth_client_id"`
 	OauthClientSecret string        `json:"oauth_client_secret" structs:"oauth_client_secret" mapstructure:"oauth_client_secret"`
 	ADDomain          string        `json:"ad_domain" structs:"ad_domain" mapstructure:"ad_domain"`
