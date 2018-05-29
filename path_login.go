@@ -63,13 +63,13 @@ func (jwt *JWTMappings) ClaimsList(name string) []string {
 		for _, v := range listSlice {
 			item, ok := v.(string)
 			if ok {
-				claimsList = append(claimsList, item)
+				claimsList = append(claimsList, strings.ToLower(item))
 			}
 		}
 	} else {
 		stringBean, ok := jwt.Claims[name].(string)
 		if ok {
-			claimsList = append(claimsList, stringBean)
+			claimsList = append(claimsList, strings.ToLower(stringBean))
 		}
 	}
 	return claimsList
@@ -404,13 +404,21 @@ func (b *backend) validateJWT(ctx context.Context, req *logical.Request, token s
 	jwtMappings := &JWTMappings{
 		Claims: claims,
 	}
-	claimPoliciesList, err := b.RoleMap.Policies(ctx, req.Storage, jwtMappings.ClaimsList(config.RoleClaim)...)
+	claimsList := jwtMappings.ClaimsList(config.RoleClaim)
+	var claimPoliciesList []string
+	if claimsList != nil {
+		claimPoliciesList, err = b.RoleMap.Policies(ctx, req.Storage, claimsList...)
+	}
 
 	if err != nil {
 		return nil, nil, err
 	}
 
-	userPoliciesList, err := b.UserMap.Policies(ctx, req.Storage, jwtMappings.ClaimsList(config.SubjectClaim)...)
+	claimsList = jwtMappings.ClaimsList(config.SubjectClaim)
+	var userPoliciesList []string
+	if claimsList != nil {
+		userPoliciesList, err = b.RoleMap.Policies(ctx, req.Storage, claimsList...)
+	}
 
 	if err != nil {
 		return nil, nil, err
