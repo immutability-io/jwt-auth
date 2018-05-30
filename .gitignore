@@ -2,3 +2,4 @@
 **/releases
 **/*.crt
 **/config.sh
+**/build.sh

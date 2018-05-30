@@ -417,7 +417,7 @@ func (b *backend) validateJWT(ctx context.Context, req *logical.Request, token s
 	claimsList = jwtMappings.ClaimsList(config.SubjectClaim)
 	var userPoliciesList []string
 	if claimsList != nil {
-		userPoliciesList, err = b.RoleMap.Policies(ctx, req.Storage, claimsList...)
+		userPoliciesList, err = b.UserMap.Policies(ctx, req.Storage, claimsList...)
 	}
 
 	if err != nil {
