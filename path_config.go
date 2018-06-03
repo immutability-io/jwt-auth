@@ -84,6 +84,11 @@ func pathConfig(b *backend) []*framework.Path {
 					Description: `Comma separated string or list of CIDR blocks. If set, specifies the blocks of
 IP addresses which can perform the login operation.`,
 				},
+				"trustee_list": &framework.FieldSchema{
+					Type: framework.TypeCommaStringSlice,
+					Description: `Comma separated string or list of trustee addresses. If set, specifies that only delegated
+authentication by one of these trustees is allowed.`,
+				},
 			},
 			Callbacks: map[logical.Operation]framework.OperationFunc{
 				logical.CreateOperation: b.pathConfigWrite,
@@ -133,7 +138,11 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 		boundCIDRList = boundCIDRListRaw.([]string)
 	}
 
-	entry, err := logical.StorageEntryJSON("config", config{
+	var trusteeList []string
+	if trusteeListRaw, ok := data.GetOk("trustee_list"); ok {
+		trusteeList = trusteeListRaw.([]string)
+	}
+	configBundle := config{
 		RoleClaim:         roleClaim,
 		SubjectClaim:      subjectClaim,
 		JWTSigner:         jwtSigner,
@@ -147,7 +156,9 @@ func (b *backend) pathConfigWrite(ctx context.Context, req *logical.Request, dat
 		TTL:               ttl,
 		MaxTTL:            maxTTL,
 		BoundCIDRList:     boundCIDRList,
-	})
+		TrusteeList:       trusteeList,
+	}
+	entry, err := logical.StorageEntryJSON("config", configBundle)
 
 	if err != nil {
 		return nil, err
@@ -188,6 +199,7 @@ func (b *backend) pathConfigRead(ctx context.Context, req *logical.Request, data
 			"ttl":                 config.TTL,
 			"max_ttl":             config.MaxTTL,
 			"bound_cidr_list":     config.BoundCIDRList,
+			"trustee_list":        config.TrusteeList,
 		},
 	}
 	return resp, nil
@@ -224,4 +236,5 @@ type config struct {
 	TTL               time.Duration `json:"ttl" structs:"ttl" mapstructure:"ttl"`
 	MaxTTL            time.Duration `json:"max_ttl" structs:"max_ttl" mapstructure:"max_ttl"`
 	BoundCIDRList     []string      `json:"bound_cidr_list_list" structs:"bound_cidr_list" mapstructure:"bound_cidr_list"`
+	TrusteeList       []string      `json:"trustee_list" structs:"trustee_list" mapstructure:"trustee_list"`
 }

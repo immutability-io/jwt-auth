@@ -27,12 +27,15 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/hashicorp/errwrap"
-	"github.com/hashicorp/vault/helper/cidrutil"
-	"github.com/hashicorp/vault/helper/policyutil"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
 	jwt "github.com/immutability-io/jwt-go"
+
+	"github.com/hashicorp/errwrap"
+	"github.com/hashicorp/vault/helper/cidrutil"
+	"github.com/hashicorp/vault/helper/policyutil"
 	"github.com/sethgrid/pester"
 )
 
@@ -191,6 +194,10 @@ func (b *backend) pathLoginAliasLookahead(ctx context.Context, req *logical.Requ
 		return nil, err
 	}
 	token := data.Get("token").(string)
+	if validConnection, err := b.validIPConstraints(ctx, req); !validConnection {
+		return nil, err
+	}
+
 	var jwtMappings *JWTMappings
 	if jwtMappingsResp, resp, err := b.validateJWT(ctx, req, token); err != nil {
 		return nil, err
@@ -216,24 +223,42 @@ func (b *backend) pathLoginAliasLookahead(ctx context.Context, req *logical.Requ
 	}, nil
 }
 
-func (b *backend) pathLogin(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
-	token := data.Get("token").(string)
-	username := data.Get("username").(string)
-	password := data.Get("password").(string)
-
-	refreshToken := ""
-
-	if username != "" && password != "" {
-		tokenResponse, err := b.getJWTFromOauthPasswordGrant(ctx, req, username, password)
-
-		if err != nil {
-			return nil, err
-		}
-		token = tokenResponse.AccessToken
-		refreshToken = tokenResponse.RefreshToken
+func (b *backend) isDelegatedAuth(ctx context.Context, req *logical.Request) (bool, error) {
+	config, err := b.Config(ctx, req.Storage)
+	if err != nil {
+		return false, err
 	}
-	var jwtMappings *JWTMappings
+	return (config.TrusteeList != nil && len(config.TrusteeList) > 0), nil
+}
 
+func (b *backend) isTrustee(ctx context.Context, req *logical.Request) (bool, error) {
+	return false, nil
+}
+
+func (b *backend) delegatedLogin(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	token := data.Get("token").(string)
+	config, err := b.Config(ctx, req.Storage)
+	if err != nil {
+		return nil, err
+	}
+
+	claims, err := b.verifyTrustee(ctx, token, config.TrusteeList)
+	if err != nil {
+		return nil, err
+	}
+	trustee := claims["iss"].(string)
+	if !contains(config.TrusteeList, trustee) {
+		return nil, fmt.Errorf("this %s address is not trusted", trustee)
+	}
+	delegateJWT, ok := claims["delegate"].(string)
+	if !ok {
+		return nil, fmt.Errorf("delegated login attempted without delegate")
+	}
+	return b.loginWithJWT(ctx, req, delegateJWT, "")
+}
+
+func (b *backend) loginWithJWT(ctx context.Context, req *logical.Request, token, refreshToken string) (*logical.Response, error) {
+	var jwtMappings *JWTMappings
 	if jwtMappingsResp, resp, err := b.validateJWT(ctx, req, token); err != nil {
 		return nil, err
 	} else if resp != nil {
@@ -288,13 +313,43 @@ func (b *backend) pathLogin(ctx context.Context, req *logical.Request, data *fra
 	}
 
 	return resp, nil
+
+}
+func (b *backend) pathLogin(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+	token := data.Get("token").(string)
+	username := data.Get("username").(string)
+	password := data.Get("password").(string)
+
+	refreshToken := ""
+	delegated, err := b.isDelegatedAuth(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if delegated {
+		return b.delegatedLogin(ctx, req, data)
+	}
+	if username != "" && password != "" {
+		tokenResponse, err := b.getJWTFromOauthPasswordGrant(ctx, req, username, password)
+
+		if err != nil {
+			return nil, err
+		}
+		token = tokenResponse.AccessToken
+		refreshToken = tokenResponse.RefreshToken
+	}
+
+	if validConnection, err := b.validIPConstraints(ctx, req); !validConnection {
+		return nil, err
+	}
+	return b.loginWithJWT(ctx, req, token, refreshToken)
+
 }
 
 func (b *backend) pathLoginRenew(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	if req.Auth == nil {
 		return nil, fmt.Errorf("there is no authentication information in this request")
 	}
-	token := ""
+	token := req.Auth.InternalData["token"].(string)
 	refreshToken, ok := req.Auth.InternalData["refresh_token"]
 	if ok && refreshToken != "" {
 		tokenResponse, err := b.getJWTFromOauthRefresh(ctx, req, refreshToken.(string))
@@ -308,6 +363,9 @@ func (b *backend) pathLoginRenew(ctx context.Context, req *logical.Request, d *f
 		} else {
 			token = tokenResponse.AccessToken
 		}
+	}
+	if validConnection, err := b.validIPConstraints(ctx, req); !validConnection {
+		return nil, err
 	}
 
 	var jwtMappings *JWTMappings
@@ -398,9 +456,6 @@ func (b *backend) validateJWT(ctx context.Context, req *logical.Request, token s
 	if claims == nil {
 		return nil, nil, fmt.Errorf("unable to parse claims - likely a time sync issue")
 	}
-	if validConnection, err := b.validIPConstraints(ctx, req); !validConnection {
-		return nil, nil, err
-	}
 	jwtMappings := &JWTMappings{
 		Claims: claims,
 	}
@@ -449,4 +504,57 @@ func (b *backend) validIPConstraints(ctx context.Context, req *logical.Request) 
 		}
 	}
 	return true, nil
+}
+
+func (b *backend) verifyTrustee(ctx context.Context, rawToken string, trustees []string) (jwt.MapClaims, error) {
+	tokenWithoutWhitespace := regexp.MustCompile(`\s*$`).ReplaceAll([]byte(rawToken), []byte{})
+	token := string(tokenWithoutWhitespace)
+
+	jwtToken, _, err := new(jwt.Parser).ParseUnverified(token, jwt.MapClaims{})
+	if err != nil || jwtToken == nil {
+		return nil, fmt.Errorf("cannot parse token")
+	}
+	unverifiedJwt := jwtToken.Claims.(jwt.MapClaims)
+	if unverifiedJwt == nil {
+		return nil, fmt.Errorf("cannot get claims")
+	}
+	ethereumAddress, ok := unverifiedJwt["iss"].(string)
+	if !ok {
+		return nil, fmt.Errorf("JWT has no issuer - iss")
+	}
+	if !contains(trustees, ethereumAddress) {
+		return nil, fmt.Errorf("we don't trust this issuer: %s", ethereumAddress)
+	}
+	jti, ok := unverifiedJwt["jti"].(string)
+	if !ok {
+		return nil, fmt.Errorf("JWT has no unique identifier - jti")
+	}
+	signatureRaw, ok := unverifiedJwt["eth"].(string)
+	if !ok {
+		return nil, fmt.Errorf("JWT has no unique Ethereum signature - eth")
+	}
+	hash := hashKeccak256(jti)
+	signature, err := hexutil.Decode(signatureRaw)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode signature")
+	}
+	pubkey, err := crypto.SigToPub(hash, signature)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive public key from signature")
+	}
+	address := crypto.PubkeyToAddress(*pubkey)
+
+	if ethereumAddress == address.Hex() {
+		validateJwt, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
+			return pubkey, nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("signature not verified")
+		}
+		claims := validateJwt.Claims.(jwt.MapClaims)
+		return claims, claims.Valid()
+	}
+	return nil, fmt.Errorf("Error verifying token")
 }
