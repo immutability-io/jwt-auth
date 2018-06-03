@@ -1,5 +1,6 @@
 **/.DS_Store
 **/releases
 **/*.crt
+**/*.pem
 **/config.sh
 **/build.sh

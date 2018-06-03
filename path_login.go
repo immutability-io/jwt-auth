@@ -27,11 +27,11 @@ import (
 	"regexp"
 	"strings"
 
+	jwt "github.com/dgrijalva/jwt-go"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
-	jwt "github.com/immutability-io/jwt-go"
 
 	"github.com/hashicorp/errwrap"
 	"github.com/hashicorp/vault/helper/cidrutil"
