@@ -166,7 +166,19 @@ Authentication fails, as it should - we are not the `bank-account-service`! We a
 
 #### Delegated Authentication
 
-So, we have deployed our `bank-account-service` to a Kubernetes cluster. This service is used by a `bank-account-application` which we login to using an OAuth2 ceremony with ADFS. This application propagates our JWT token to our trustee - the `bank-account-service`. This service performs delegated authentication as follows. First, we call the Vault Trustee plugin to create a `claim`. This `claim` takes the form of a JWT token that is signed with the private key used to generate the Trustee's Ethereum address:
+So, we have deployed our `bank-account-service` to a Kubernetes cluster. This service is used by a `bank-account-application` which we login to using an OAuth2 ceremony with ADFS. This application propagates our JWT token to our trustee - the `bank-account-service`. This JWT is a base64 encoded string that the `bank-account-service` adds to a JSON structure that constitutes the claims it wants to make. This JWT **must be** the `delegate` claim:
+
+```sh
+
+$ cat claims.json
+{
+  "service": "bank-account-service",
+  "delegate": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJncm91cCI6WyJwYXktbWFzdGVyLWdyb3VwIl0sInN1YiI6ImN5cGhlcmhhdCJ9.kNrzfOxcALrGXQPbYkSnoBJ_LjiRfPmQXjCOv5l2uUeuM3H6GCdqnQY5kvnZtJuj4ztR3Us_uDI5cxhDJ45OQEHz4zRipYJX28rKHfO04rK1ieP95KNRxlQ1YCnufWmHHmPJgh3aK-a9zGdy2ZaXlmpVbDEOxNyUm7gNuJ1AFkYqN0S_LnNx_alU5zzoxTkKGMpTLVGzPqVKrhXRuEZwK1duKlAS4YIvq4BzYJm7lMyAafdxEkeqPb1VptQEvJzyIU2xkZMBBlhbxj6qZUEiiKloPzgAs6z1pLYDCpJL6SZ50ozyDM3tqocqY6Qqaxl3Rk0WARC17z7UFIuiOERMfUafvKC5v8aA7Wzr_3BoM91qNI3IyqFl-GEYToDZ4TD922hvNaVpdKciKIJMUUZjNXvXD9xhGWWUqwvHMPkYYJDnC5uRDdlgzgXVIGD0ABPk3a6ULLMw9PxF_RpjQzUkqVfywsUvaUOj0jPx1SVeS3CQdjFcPLwYQuub5H3HzjGUWSFLetktGrbdG_YnW6lFAz-wMzI_BYOSBtwiq9IhrxDL0x2E6PYnU1k5C0-DmYV3yDb_cMNul0KZLq4e0tC6i8YeteAlqCfoWOc3WgWPuqVulBsPGIkbmuRNYOWEpxlseWaX41On_BSskfL7NK02YHHFIZH91njGSDHo_Md0h6Y"
+}
+
+```
+
+First, we call the Vault Trustee plugin to create a `claim`. This `claim` takes the form of a JWT token that is signed with the private key used to generate the Trustee's Ethereum address:
 
 ```sh
 $ vault write -format=json trust/trustees/bank-account-service/claim  claims=@claim.json
