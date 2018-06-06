@@ -5,6 +5,10 @@ JWTs are all the rage. They provide a simple way of transmitting claims made by 
 
 This plugin is just another tool in the chest for a Vaulter: if you wish to provide access to Vault based upon the bearer of a JWT, then here is your tool. Context is everything, and since Vault gives you choices about how to manage context, this plugin gives you another choice in how to navigate that context.
 
+## Delegated Authentication
+
+This plugin can be used in concert with the [Trustee plugin](https://github.com/immutability-io/trustee) to effect [delegated authentication](./DELEGATED.md).
+
 ## Build/Install
 
 Building is typically golang: 

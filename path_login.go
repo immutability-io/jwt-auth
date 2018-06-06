@@ -313,8 +313,8 @@ func (b *backend) loginWithJWT(ctx context.Context, req *logical.Request, token,
 	}
 
 	return resp, nil
-
 }
+
 func (b *backend) pathLogin(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
 	token := data.Get("token").(string)
 	username := data.Get("username").(string)
