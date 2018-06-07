@@ -8,6 +8,10 @@ I have built 2 Vault plugins - [the trustee plugin](https://github.com/immutabil
 
 There are a handful of ways the Trustee plugin can be used effectively in conjunction with the JWT-Auth plugin. I will start with a very simple use case: 
 
+![Delegated Authentication](./doc/delegated.png?raw=true "Delegated Authentication Flow")
+
+It must be pointed out: **the Web Service above can use a completely separate Vault for the Trustee plugin than it uses for authentication (JWT-Auth plugin).** This is because the Trustee's address is all the JWT-Auth plugin needs to **trust** to validate the JWT.
+
 ## Governance by Proxy
 
 Imagine that you have an identity in Active Directory: You have a user ID and you are the member of a handful of Active Directory groups. One of these groups is `pay-master-group`. Your membership in this group means that you are allowed to cut checks from a bank account (`123412341234`) that holds millions of dollars.

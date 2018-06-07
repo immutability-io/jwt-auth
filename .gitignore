@@ -2,5 +2,7 @@
 **/releases
 **/*.crt
 **/*.pem
+**/test
+**/test/*
 **/config.sh
 **/build.sh
