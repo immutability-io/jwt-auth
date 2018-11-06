@@ -293,7 +293,6 @@ func (b *backend) loginWithJWT(ctx context.Context, req *logical.Request, token,
 			Policies:    jwtMappings.Policies,
 			Metadata: map[string]string{
 				"username": subject.(string),
-				"jwt":      token,
 				"roles":    fmt.Sprintf("%v", claims),
 			},
 			LeaseOptions: logical.LeaseOptions{
@@ -304,6 +303,7 @@ func (b *backend) loginWithJWT(ctx context.Context, req *logical.Request, token,
 				Name: subject.(string),
 			},
 		},
+		Data: map[string]interface{}{"jwt": token},
 	}
 	listSlice := jwtMappings.ClaimsList(config.RoleClaim)
 	for _, item := range listSlice {
