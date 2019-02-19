@@ -247,7 +247,7 @@ func (b *backend) delegatedLogin(ctx context.Context, req *logical.Request, data
 		return nil, err
 	}
 	trustee := claims["iss"].(string)
-	if !contains(config.TrusteeList, trustee) {
+	if !containsIgnoreCase(config.TrusteeList, trustee) {
 		return nil, fmt.Errorf("this %s address is not trusted", trustee)
 	}
 	delegateJWT, ok := claims["delegate"].(string)
@@ -522,7 +522,7 @@ func (b *backend) verifyTrustee(ctx context.Context, rawToken string, trustees [
 	if !ok {
 		return nil, fmt.Errorf("JWT has no issuer - iss")
 	}
-	if !contains(trustees, ethereumAddress) {
+	if !containsIgnoreCase(trustees, ethereumAddress) {
 		return nil, fmt.Errorf("we don't trust this issuer: %s", ethereumAddress)
 	}
 	jti, ok := unverifiedJwt["jti"].(string)
@@ -546,7 +546,7 @@ func (b *backend) verifyTrustee(ctx context.Context, rawToken string, trustees [
 	}
 	address := crypto.PubkeyToAddress(*pubkey)
 
-	if ethereumAddress == address.Hex() {
+	if strings.ToUpper(ethereumAddress) == strings.ToUpper(address.Hex()) {
 		validateJwt, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
 			return pubkey, nil
 		})

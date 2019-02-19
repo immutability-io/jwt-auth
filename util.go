@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/crypto"
 )
@@ -13,9 +14,9 @@ func hashKeccak256(data string) []byte {
 	return hash
 }
 
-func contains(stringSlice []string, searchString string) bool {
+func containsIgnoreCase(stringSlice []string, searchString string) bool {
 	for _, value := range stringSlice {
-		if value == searchString {
+		if strings.ToUpper(value) == strings.ToUpper(searchString) {
 			return true
 		}
 	}
